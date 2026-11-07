@@ -49,11 +49,12 @@ adb devices
 
 ```sh
 # В начале работы:
-adb shell 'svc power stayon true; settings put global stay_on_while_plugged_in 3; settings put secure sleep_timeout -1; settings put system screen_off_timeout 2147483647'
+adb shell 'svc power stayon true; settings put global stay_on_while_plugged_in 3; settings put secure sleep_timeout -1; settings put secure attentive_timeout -1; settings put system screen_off_timeout 2147483647'
 
-# В конце работы (обязательно вернуть!):
-adb shell 'svc power stayon false; settings put global stay_on_while_plugged_in 0; settings delete secure sleep_timeout; settings delete system screen_off_timeout'
+# В конце работы (обязательно вернуть исходные значения из бэкапа п. 1 или явные ТВ-таймауты: 30 мин до заставки, 24 ч до сна):
+adb shell 'svc power stayon false; settings put global stay_on_while_plugged_in 0; settings put system screen_off_timeout 1800000; settings put secure sleep_timeout 86400000; settings put secure attentive_timeout -1'
 ```
+> ⚠️ **Никогда не делать `settings delete system screen_off_timeout` или `settings delete secure sleep_timeout`!** `SettingsProvider` загружает заводские дефолты ТВ (`def_screen_off_timeout=300000`, `def_sleep_timeout=86400000`) только один раз при первом создании базы. Команда `settings delete` стирает ключ в `null`, после чего `PowerManagerService` откатывается на жёстко зашитый в AOSP **телефонный** таймаут **`15000` мс (15 секунд)** — и телевизор начинает выключаться через 15–20 секунд после постановки видео на паузу!
 
 И сразу отключить проверку Play Protect для ADB-установок (иначе `adb install` повиснет в ожидании нажатия кнопки «Разрешить» с пульта на экране ТВ):
 
@@ -126,13 +127,18 @@ comm -13 <(adb shell pm list packages | sed 's/package://' | sort) \
 |---|---|
 | `com.google.android.katniss` | **Google Ассистент (100–140 МБ в фоне всегда).** ⚠️ **Спросить владельца перед сносом:** если снести — перестанет работать кнопка микрофона (голосовой ввод) на пульте. Если голосом не пользуются — главный кандидат на снос. |
 | `com.google.android.apps.mediashell` | **Google Cast / встроенный Chromecast (60–95 МБ в фоне всегда).** ⚠️ **Спросить владельца:** если с телефона видео/музыку кнопкой Cast на ТВ не кидают — сносить; если кидают — оставить. |
-| `com.google.android.tvrecommendations`, `com.google.android.backdrop` | Полки «Рекомендаций» Android TV и фоновое слайд-шоу заставки Daydream. Нужны только стоковому лаунчеру; с FLauncher бесполезно держат ~50–80 МБ. |
+| `com.google.android.tvrecommendations`, `com.google.android.backdrop`* | Полки «Рекомендаций» Android TV и фоновое слайд-шоу заставки Daydream. Нужны только стоковому лаунчеру; с FLauncher бесполезно держат ~50–80 МБ (*при сносе `backdrop` обязательно переключить заставку — см. ниже!). |
 | `com.netflix.ninja` | **Netflix — двойной выигрыш (~150+ МБ):** сам висит в фоне ради быстрого старта с кнопки пульта, а главное — именно он регулярно будит `com.google.android.gms.unstable` (**`DroidGuard`**, ещё **106 МБ RAM**) для проверки аттестации/DRM. После сноса Netflix процесс `DroidGuard` исчез совсем. |
 | `ru.more.play`, `ru.mts.mtstv`, `mobi.zona.lite`, `ru.ivi.client` | Предустановленные кинотеатры (Okko, KION, Zona, IVI). Даже если их ни разу не открывали, они стартуют по `BOOT_COMPLETED` и `ChannelsWorker`, чтобы пушить рекламные баннеры на главный экран, и остаются в RAM навсегда. |
 | `com.google.android.videos`, `com.google.android.play.games` | Мёртвый Google Play Фильмы и Play Игры (фоновые синхронизации). |
 | `ru.haier.evo`, `com.haier.apps.evoSmart`, `com.haierubic.usmartdevice` | Вендорская рекламная оболочка Haier EVO и демон умного дома Haier (постоянно висят в памяти и шлют телеметрию). |
 | `tv.anoki.acr.*` | **ACR (Automatic Content Recognition)** — шпионский модуль распознавания того, что сейчас показывают на экране (снимает отпечатки кадров для рекламного таргетинга). Сносить безусловно. |
 | `com.avo.vpn`, `fusion.android.tv.demo`*, `de.benzac.msx`, `com.cltv.fast` | Вшитый VPN, магазинное демо (*для `fusion.android.tv.demo` сначала проверить п. 2.2!), Media Station X, FAST-каналы. |
+
+> ⚠️ **Обязательно при сносе `com.google.android.backdrop`:** если оставить удалённый `.Backdrop` в `screensaver_components`, то при срабатывании таймера заставки (`Nap time`) `DreamController` получит `bindService failed` и `PowerManagerService` **тут же отправит ТВ в полный аппаратный сон (`Going to sleep due to timeout`)**. Поэтому сразу переключить заставку на встроенную `BasicDreams` (или отключить заставку, если `com.android.dreams.basic` вырезан из прошивки):
+> ```sh
+> adb shell 'if pm path com.android.dreams.basic >/dev/null 2>&1; then settings put secure screensaver_components com.android.dreams.basic/com.android.dreams.basic.Colors; settings put secure screensaver_default_component com.android.dreams.basic/com.android.dreams.basic.Colors; else settings put secure screensaver_enabled 0; fi'
+> ```
 
 **Не трогать ни в коем случае:**
 * `com.google.android.gms`, `com.google.android.gsf`, `com.android.vending` — Google Play Services и Play Store (без них падают YouTube/Кинопоиск и авторизация).
